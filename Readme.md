@@ -8,7 +8,7 @@
 - EFSFileSystem
 
 
-## **サービス(wordpress)にアクセス**##
+## **サービス(wordpress)にアクセス**
 ``http://${LoadBalancer.DNSName}``
 
 ## **Stack作成コマンド**
