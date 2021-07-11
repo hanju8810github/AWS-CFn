@@ -9,7 +9,7 @@ Parameters:
 Mappings:
   RegionMap:
     'ap-northeast-1':
-      AMI: 'ami-2803ac4e'
+      AMI: 'ami-0b276ad63ba2d6009'
 Resources:
   VPC:
     Type: 'AWS::EC2::VPC'
