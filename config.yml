@@ -1,0 +1,316 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - prd
+      - stg
+      - dev
+  SystemName:
+    Type: String
+    Default: "hanju-dev"
+  ConfigSnapshotDeliveryValue:
+    Type: String
+    Default: TwentyFour_Hours
+    AllowedValues:
+      - One_Hour
+      - Three_Hours
+      - Six_Hours
+      - Twelve_Hours
+      - TwentyFour_Hours
+Resources:
+
+  # S3 Bucket
+
+  ConfigS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub "config-${Environment}-${SystemName}"
+
+  # Bucket Policy
+
+  ConfigS3BucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Sub "${ConfigS3Bucket}"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSConfigBucketPermissionsCheck
+            Effect: Allow
+            Principal:
+              Service:
+                - config.amazonaws.com
+            Action: "s3:GetBucketAcl"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::${ConfigS3Bucket}"
+          - Sid: "AWSConfigBucketExistenceCheck"
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "config.amazonaws.com"
+            Action: "s3:ListBucket"
+            Resource : !Sub "arn:${AWS::Partition}:s3:::${ConfigS3Bucket}"
+          -
+            Sid: "AWSConfigBucketDelivery"
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "config.amazonaws.com"
+            Action: "s3:PutObject"
+            Resource: !Sub "arn:${AWS::Partition}:s3:::${ConfigS3Bucket}/AWSLogs/${AWS::AccountId}/*"
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: "bucket-owner-full-control"
+
+  # SNS Topic
+
+  ConfigSnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: "ConfigTopic"
+      TopicName: !Sub "config-${Environment}-${SystemName}"
+      # Subscription:
+      #   - Endpoint: hanju8810growth@gmail.com
+      #     Protocol: email
+
+  # IAM Role
+
+  ConfigIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - !Ref ConfigIamRolePolicy
+      RoleName: !Sub "config-${Environment}-${SystemName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "config.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+
+  ConfigcFnDriftDetectCheckRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+
+  # IAM Policy
+
+  ConfigIamRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "config-${Environment}-${SystemName}-policy"
+      Description: "Policy for Config Role"
+      Path: "/"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action: "s3:PutObject*"
+            Resource:
+              - !Sub "arn:aws:s3:::${ConfigS3Bucket}/AWSLogs/${AWS::AccountId}/Config/*"
+            Condition:
+              StringLike:
+                s3:x-amz-acl: "bucket-owner-full-control"
+          - Effect: Allow
+            Action: "s3:GetBucketAcl"
+            Resource: !Sub "arn:aws:s3:::${ConfigS3Bucket}"
+          - Effect: Allow
+            Action: "sns:Publish"
+            Resource: !Sub "arn:aws:sns:ap-northeast-1:${AWS::AccountId}"
+
+  ConfigcFnDriftDetectCheckPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "config-${Environment}-${SystemName}-cfn-drift-detect-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - "cloudformation:DetectStackResourceDrift"
+              - "cloudformation:DescribeStackDriftDetectionStatus"
+              - "cloudformation:DetectStackDrift"
+            Resource:
+              - "*"
+      Roles:
+        - !Ref ConfigcFnDriftDetectCheckRole
+
+  # Delivery Channel
+
+  DeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    DependsOn:
+      - ConfigS3BucketPolicy
+    Properties:
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: !Sub ${ConfigSnapshotDeliveryValue}
+      S3BucketName: !Ref ConfigS3Bucket
+      SnsTopicARN: !Ref ConfigSnsTopic
+
+  # Config Recorder
+
+  ConfigRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    DependsOn:
+      - ConfigS3BucketPolicy
+    Properties:
+      Name: default
+      RecordingGroup:
+        ResourceTypes:
+          - "AWS::EC2::Instance"
+          - "AWS::EC2::EIP"
+          - "AWS::CloudFormation::Stack"
+          - "AWS::EC2::SecurityGroup"
+          - "AWS::IAM::Role"
+          - "AWS::S3::Bucket"
+          - "AWS::SSM::ManagedInstanceInventory"
+          - "AWS::IAM::Policy"
+      RoleARN: !GetAtt ConfigIamRole.Arn
+
+  # Config Rule
+
+  ConfigRuleForRestrictedSsh:
+    Type: AWS::Config::ConfigRule
+    DependsOn:
+      - DeliveryChannel
+      - ConfigRecorder
+    Properties:
+      Scope:
+        ComplianceResourceTypes:
+          - "AWS::EC2::SecurityGroup"
+      Source:
+        Owner: AWS
+        SourceIdentifier: "INCOMING_SSH_DISABLED"
+
+  ConfigRuleForRestrictedCommonPortts:
+    Type: AWS::Config::ConfigRule
+    DependsOn:
+      - DeliveryChannel
+      - ConfigRecorder
+    Properties:
+      Scope:
+        ComplianceResourceTypes:
+          - "AWS::EC2::SecurityGroup"
+      Source:
+        Owner: AWS
+        SourceIdentifier: "RESTRICTED_INCOMING_TRAFFIC"
+
+  ConfigRuleForGuarddutyEnabledCentralized:
+    Type: AWS::Config::ConfigRule
+    DependsOn:
+      - DeliveryChannel
+      - ConfigRecorder
+    Properties:
+      Source:
+        Owner: AWS
+        SourceIdentifier: "GUARDDUTY_ENABLED_CENTRALIZED"
+
+  ConfigRuleForS3BucketPublicReadProhibited:
+    Type: AWS::Config::ConfigRule
+    DependsOn:
+      - DeliveryChannel
+      - ConfigRecorder
+    Properties:
+      Scope:
+        ComplianceResourceTypes:
+          - "AWS::S3::Bucket"
+      Source:
+        Owner: AWS
+        SourceIdentifier: "S3_BUCKET_PUBLIC_READ_PROHIBITED"
+
+  ConfigRuleForS3BucketPublicWriteProhibited:
+    Type: AWS::Config::ConfigRule
+    DependsOn:
+      - DeliveryChannel
+      - ConfigRecorder
+    Properties:
+      Scope:
+        ComplianceResourceTypes:
+          - "AWS::S3::Bucket"
+      Source:
+        Owner: AWS
+        SourceIdentifier: "S3_BUCKET_PUBLIC_WRITE_PROHIBITED"
+
+  ConfigRuleForIamPolicyNoStatementsWithFullAccess:
+    Type: AWS::Config::ConfigRule
+    DependsOn:
+      - DeliveryChannel
+      - ConfigRecorder
+    Properties:
+      Scope:
+        ComplianceResourceTypes:
+          - "AWS::IAM::Policy"
+      Source:
+        Owner: AWS
+        SourceIdentifier: "IAM_POLICY_NO_STATEMENTS_WITH_FULL_ACCESS"
+
+  ConfigRuleForEipAttached:
+    Type: AWS::Config::ConfigRule
+    DependsOn:
+      - DeliveryChannel
+      - ConfigRecorder
+    Properties:
+      Scope:
+        ComplianceResourceTypes:
+          - "AWS::EC2::EIP"
+      Source:
+        Owner: AWS
+        SourceIdentifier: "EIP_ATTACHED"
+
+  # Required Policy Arns
+  # ConfigRuleForIamPolicyInUse:
+  #   Type: AWS::Config::ConfigRule
+  #   DependsOn:
+  #     - DeliveryChannel
+  #     - ConfigRecorder
+  #   Properties:
+  #     Scope:
+  #       ComplianceResourceTypes:
+  #         - "AWS::IAM::Policy"
+  #     Source:
+  #       Owner: AWS
+  #       SourceIdentifier: "IAM_POLICY_IN_USE"
+
+  ConfigRuleForEc2InstanceManagedBySystemsManager:
+    Type: AWS::Config::ConfigRule
+    DependsOn:
+      - DeliveryChannel
+      - ConfigRecorder
+    Properties:
+      Scope:
+        ComplianceResourceTypes:
+          - "AWS::EC2::Instance"
+          - "AWS::SSM::ManagedInstanceInventory"
+      Source:
+        Owner: AWS
+        SourceIdentifier: "EC2_INSTANCE_MANAGED_BY_SSM"
+
+  ConfigRuleForCloudformationStackDriftDetectionCheck:
+    Type: AWS::Config::ConfigRule
+    DependsOn:
+      - DeliveryChannel
+      - ConfigRecorder
+    Properties:
+      Scope:
+        ComplianceResourceTypes:
+          - "AWS::CloudFormation::Stack"
+      Source:
+        Owner: AWS
+        SourceIdentifier: "CLOUDFORMATION_STACK_DRIFT_DETECTION_CHECK"
+      InputParameters:
+        cloudformationRoleArn: !GetAtt ConfigcFnDriftDetectCheckRole.Arn
