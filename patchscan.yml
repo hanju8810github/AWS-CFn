@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  PatchGroupName:
+    Type: String
+    Default: hanju-dev-pg
+    Description: patch group name
+  PatchScanSchedule:
+    Type: String
+    Default: "cron(0 0 3 ? * * *)"
+    Description: "patch scan schedule cron expression (JST)"
+  PatchTargetOperatingSystem:
+    Type: String
+    Default: AMAZON_LINUX_2
+    AllowedValues:
+      - AMAZON_LINUX
+      - AMAZON_LINUX_2
+      - CENTOS
+      - DEBIAN
+      - MACOS
+      - ORACLE_LINUX
+      - REDHAT_ENTERPRISE_LINUX
+      - SUSE
+      - UBUNTU
+      - WINDOWS
+# Metadata:
+Description: ""
+Resources:
+  SSMPatchBaseline:
+    Type: "AWS::SSM::PatchBaseline"
+    Properties:
+      Name: !Sub ${AWS::StackName}-fullscan-patchbaseline
+      OperatingSystem: !Ref PatchTargetOperatingSystem
+      ApprovalRules:
+        PatchRules:
+          - ApproveAfterDays: 0
+            PatchFilterGroup:
+              PatchFilters:
+                - Key: PRODUCT
+                  Values:
+                    - "*"
+                - Key: CLASSIFICATION
+                  Values:
+                    - "*"
+            ComplianceLevel: UNSPECIFIED
+            EnableNonSecurity: false
+      ApprovedPatchesComplianceLevel: "UNSPECIFIED"
+      ApprovedPatchesEnableNonSecurity: false
+      RejectedPatchesAction: "ALLOW_AS_DEPENDENCY"
+      PatchGroups:
+        - !Ref PatchGroupName
+
+  SSMMaintenanceWindow:
+    Type: "AWS::SSM::MaintenanceWindow"
+    Properties:
+      Name: !Sub ${AWS::StackName}-maintenancewindow
+      Schedule: !Ref PatchScanSchedule
+      ScheduleTimezone: "Asia/Tokyo"
+      Duration: 1
+      Cutoff: 0
+      AllowUnassociatedTargets: true
+
+  SSMMaintenanceWindowTask:
+    Type: "AWS::SSM::MaintenanceWindowTask"
+    Properties:
+      Name: !Sub ${AWS::StackName}-maintenancewindow-task
+      WindowId: !Ref SSMMaintenanceWindow
+      Targets:
+        -
+          Key: "WindowTargetIds"
+          Values:
+            - !Ref SSMMaintenanceWindowTarget
+      TaskArn: "AWS-RunPatchBaseline"
+      ServiceRoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ssm.amazonaws.com/AWSServiceRoleForAmazonSSM"
+      TaskType: "RUN_COMMAND"
+      TaskParameters: {}
+      Priority: 1
+      MaxConcurrency: "50"
+      MaxErrors: "0"
+      TaskInvocationParameters:
+        MaintenanceWindowRunCommandParameters:
+          Parameters:
+            Operation:
+              - "Scan"
+            SnapshotId:
+              - "{{WINDOW_EXECUTION_ID}}"
+          TimeoutSeconds: 600
+
+  SSMMaintenanceWindowTarget:
+    Type: "AWS::SSM::MaintenanceWindowTarget"
+    Properties:
+      Name: !Sub ${AWS::StackName}-patch-target
+      WindowId: !Ref SSMMaintenanceWindow
+      ResourceType: "INSTANCE"
+      Targets:
+        -
+          Key: "tag:Patch Group"
+          Values:
+            - !Ref PatchGroupName
