@@ -1,20 +1,17 @@
 # **AWS CloudFormationを使ったインフラ構築**
 
 ## **構築されるサービス**
-- EC2 インスタンス（Wordpress)　×2
-- 　※上記EC2はAutoScallingGroupに属する
-- 　  ２つのAZをまたいだSubnetに作成される
-- RDS　MySQl5.6
-- EFSFileSystem
+- EC2 インスタンス（AmazonLinux2)　×1
+- Systems Manager
+- httpd
+- php74
 
-
-## **サービス(wordpress)にアクセス**
-``http://${LoadBalancer.DNSName}``
+※SSM接続可能
 
 ## **Stack作成コマンド**
-``
-aws cloudformation create-stack --stack-name <stackname> --template-body file://<File Path>
-``
 
-## **Stack削除コマンド**
-``aws cloudformation delete-stack --stack-name <stackname> ``
+1.VPC EC2インスタンス作成
+
+``
+aws cloudformation deploy --stack-name <stack-name> --template-file template.yml --capabilities CAPABILITY_NAMED_IAM --no-execute-changeset
+``

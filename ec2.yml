@@ -4,11 +4,11 @@ Description: Made in AWS'
 Parameters:
   SystemName:
     Type: String
-    Default: MySystem
+    Default: hanju-dev
   KeyName:
     Description: 'Key Pair name'
     Type: 'AWS::EC2::KeyPair::KeyName'
-    Default: Mykey
+    Default: hanju8810_key
   AmiId:
     Description: Input an ami-id. Default is the latest AmazonLinux2 AMI.
     Type: AWS::SSM::Parameter::Value<String>
@@ -28,8 +28,8 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
-  SshInboundIp:
-    Description: Input an IP address you want to access with SSH. e.g. 0.0.0.0/0
+  AllInboundIp:
+    Description: Input an IP address you want to access with all.
     Type: String
     Default: "126.76.16.238/32"
 
@@ -132,7 +132,7 @@ Resources:
             }
             yum:
               httpd: []
-              php80: [ ]
+              php74: [ ]
           files:
             /var/www/html/index.html:
               content: !Sub |
@@ -191,11 +191,11 @@ Resources:
       GroupDescription: !Sub Security Group attached to ${InstanceName}
       GroupName: !Sub "Sg_${SystemName}"
       SecurityGroupIngress:
-        - CidrIp: !Ref SshInboundIp
-          Description: SSH port
-          FromPort: 22
-          IpProtocol: tcp
-          ToPort: 22
+        - CidrIp: !Ref AllInboundIp
+          Description: all port
+          FromPort: -1
+          IpProtocol: -1
+          ToPort: -1
 
 # Create IAM Role
   IamRole1:
