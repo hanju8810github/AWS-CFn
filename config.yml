@@ -1,11 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
 Parameters:
-  Environment:
-    Type: String
-    AllowedValues:
-      - prd
-      - stg
-      - dev
   SystemName:
     Type: String
     Default: "hanju-dev"
@@ -26,7 +20,7 @@ Resources:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub "config-${Environment}-${SystemName}"
+      BucketName: !Sub "config-${SystemName}"
 
   # Bucket Policy
 
@@ -70,10 +64,10 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       DisplayName: "ConfigTopic"
-      TopicName: !Sub "config-${Environment}-${SystemName}"
-      # Subscription:
-      #   - Endpoint: hanju8810growth@gmail.com
-      #     Protocol: email
+      TopicName: !Sub "config-${SystemName}"
+      Subscription:
+        - Endpoint: <email>
+          Protocol: email
 
   # IAM Role
 
@@ -81,8 +75,8 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       ManagedPolicyArns:
-        - !Ref ConfigIamRolePolicy
-      RoleName: !Sub "config-${Environment}-${SystemName}"
+        - "arn:aws:iam::aws:policy/service-role/AWSConfigRole"
+      RoleName: !Sub "config-${SystemName}"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -91,6 +85,7 @@ Resources:
             Principal:
               Service:
                 - "config.amazonaws.com"
+                - cloudformation.amazonaws.com
             Action:
               - "sts:AssumeRole"
       Path: "/"
@@ -105,6 +100,7 @@ Resources:
             Principal:
               Service:
                 - cloudformation.amazonaws.com
+                - config.amazonaws.com
             Action:
               - 'sts:AssumeRole'
 
@@ -113,7 +109,7 @@ Resources:
   ConfigIamRolePolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      ManagedPolicyName: !Sub "config-${Environment}-${SystemName}-policy"
+      ManagedPolicyName: !Sub "config-${SystemName}-policy"
       Description: "Policy for Config Role"
       Path: "/"
       PolicyDocument:
@@ -132,11 +128,14 @@ Resources:
           - Effect: Allow
             Action: "sns:Publish"
             Resource: !Sub "arn:aws:sns:ap-northeast-1:${AWS::AccountId}"
+          - Effect: Allow
+            Action: "config:PutEvaluations"
+            Resource: !Sub "arn:aws:sts::${AWS::AccountId}:assumed-role/config-${SystemName}/*"
 
   ConfigcFnDriftDetectCheckPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub "config-${Environment}-${SystemName}-cfn-drift-detect-policy"
+      PolicyName: !Sub "config-${SystemName}-cfn-drift-detect-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -275,9 +274,9 @@ Resources:
   # Required Policy Arns
   # ConfigRuleForIamPolicyInUse:
   #   Type: AWS::Config::ConfigRule
-  #   DependsOn:
-  #     - DeliveryChannel
-  #     - ConfigRecorder
+    # DependsOn:
+    #   - DeliveryChannel
+    #   - ConfigRecorder
   #   Properties:
   #     Scope:
   #       ComplianceResourceTypes:
