@@ -1,0 +1,258 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description:
+  VPC and Subnet Create
+
+# ------------------------------------------------------------#
+# Input Parameters
+# ------------------------------------------------------------#
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+
+  VPCCIDR:
+    Type: String
+    Default: "172.19.0.0/16"
+
+  PublicSubnetDevCIDR:
+    Type: String
+    Default: "172.19.2.0/24"
+
+  ProtectedSubnetDevCIDR:
+    Type: String
+    Default: "172.19.12.0/24"
+
+  PrivateSubnetDevCIDR:
+    Type: String
+    Default: "172.19.22.0/24"
+
+  AllInboundIp:
+    Type: String
+    Default: <MyIp>
+
+Resources:
+# ------------------------------------------------------------#
+#  VPC
+# ------------------------------------------------------------#
+# VPC Create
+  VPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: "true"
+      EnableDnsHostnames: "true"
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-vpc"
+
+  DHCPOptions:
+    Type: AWS::EC2::DHCPOptions
+    Properties:
+      DomainName: !Sub "${AWS::Region}.compute.internal$.{Environment}"
+      DomainNameServers:
+        - AmazonProvidedDNS
+
+  VPCDHCPOptionsAssociation:
+    Type: AWS::EC2::VPCDHCPOptionsAssociation
+    Properties:
+      DhcpOptionsId: !Ref DHCPOptions
+      VpcId: !Ref VPC
+
+# InternetGateway Create
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-igw"
+
+# IGW Attach
+  InternetGatewayAttachment:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+# ------------------------------------------------------------#
+# SecurityGroup
+# ------------------------------------------------------------#
+
+  SecurityGroupDev:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupName: !Sub "${Environment}-sg"
+      GroupDescription: ishikawa allow sg
+      SecurityGroupIngress:
+        - CidrIp: !Ref AllInboundIp
+          Description: all port
+          FromPort: -1
+          IpProtocol: -1
+          ToPort: -1
+
+# ------------------------------------------------------------#
+#  RouteTable and route
+# ------------------------------------------------------------#
+
+  PublicSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-Publicsubnet-routetable"
+
+  InternetGatewayRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref PublicSubnetRouteTable
+      GatewayId: !Ref InternetGateway
+    DependsOn: InternetGatewayAttachment
+
+  ProtectedSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-Protectedsubnet-routetable"
+
+  ProtectedSubnetRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref ProtectedSubnetRouteTable
+      GatewayId: !Ref InternetGateway
+    DependsOn: InternetGatewayAttachment
+
+  PrivateSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-Privatesubnet-routetable"
+
+# ------------------------------------------------------------#
+#  Subnet
+# ------------------------------------------------------------#
+
+# Public SubnetDev Create
+  PublicSubnetDev:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: "ap-northeast-1c"
+      CidrBlock: !Ref PublicSubnetDevCIDR
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-public-subnet-dev"
+
+  PublicSubnetDevAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicSubnetRouteTable
+      SubnetId: !Ref PublicSubnetDev
+
+# Protected SubnetDev Create
+  ProtectedSubnetDev:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: "ap-northeast-1c"
+      CidrBlock: !Ref ProtectedSubnetDevCIDR
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-protected-subnet-dev"
+
+  ProtectedSubnetDevAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref ProtectedSubnetRouteTable
+      SubnetId: !Ref ProtectedSubnetDev
+
+# Private SubnetDev Create
+  PrivateSubnetDev:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: "ap-northeast-1c"
+      CidrBlock: !Ref PrivateSubnetDevCIDR
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-private-subnet-dev"
+
+# Privade DNS HostedZone Create
+  PrivateDNSHostedZone:
+    Type: "AWS::Route53::HostedZone"
+    Properties:
+      HostedZoneConfig:
+        Comment: "PrivateDNSDev"
+      Name: !Sub
+        "${Environment}-dev"
+      VPCs:
+        - VPCId: !Ref VPC
+          VPCRegion: !Ref AWS::Region
+
+
+# ------------------------------------------------------------#
+# Output Parameters
+# ------------------------------------------------------------#
+Outputs:
+# VPC
+  VPC:
+    Value: !Ref VPC
+    Export:
+      Name: !Sub "${Environment}-vpc"
+
+  VPCCIDR:
+    Value: !Ref VPCCIDR
+    Export:
+      Name: !Sub "${Environment}-vpc-cidr"
+
+# Security Group
+  SecurityGroupDev:
+    Value: !Ref SecurityGroupDev
+    Export:
+      Name: !Sub "${Environment}-sg-dev"
+
+# Subnet
+
+  PublicSubnetDev:
+    Value: !Ref PublicSubnetDev
+    Export:
+      Name: !Sub "${Environment}-public-subnet-dev"
+
+  PublicSubnetDevCIDR:
+    Value: !Ref PublicSubnetDevCIDR
+    Export:
+      Name: !Sub "${Environment}-public-subnet-dev-cidr"
+
+  ProtectedSubnetDev:
+    Value: !Ref ProtectedSubnetDev
+    Export:
+      Name: !Sub "${Environment}-protected-subnet-dev"
+
+  ProtectedSubnetDevCIDR:
+    Value: !Ref ProtectedSubnetDevCIDR
+    Export:
+      Name: !Sub "${Environment}-protected-subnet-dev-cidr"
+
+  PrivateSubnetDev:
+    Value: !Ref PrivateSubnetDev
+    Export:
+      Name: !Sub "${Environment}-private-subnet-dev"
+
+  PrivateSubnetDevCIDR:
+    Value: !Ref PrivateSubnetDevCIDR
+    Export:
+      Name: !Sub "${Environment}-private-subnet-dev-cidr"
+
+  PrivateDNSHostedZone:
+    Description: PrivateDNSHostedZone
+    Value: !Ref PrivateDNSHostedZone
+    Export:
+      Name: !Sub "${Environment}-private-dnshostedzone"

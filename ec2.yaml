@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description:
+  EC2 Instance Create
+
+## Input Parameters
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+
+  KeyName:
+    Description: 'Key Pair name'
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    Default: <MyKeyPair>
+
+  WebDevelopInstanceType:
+    Description: Input an WebDevelopInstance type.
+    Type: String
+    Default: t3.small
+
+  WebDevelopInstanceName:
+    Description: Input a instance name.
+    Type: String
+    Default: web-ec2-dev
+
+  AmiId:
+    Type: String
+    Default: <MyAMIID>
+
+  DbDevelopInstanceType:
+    Description: Input an DbDevelopInstance type.
+    Type: String
+    Default: t3.small
+
+  DbDevelopInstanceName:
+    Description: Input a Dbinstance name.
+    Type: String
+    Default: db-ec2-dev
+
+  AttachPublicIpAddress:
+    Description: Set to true if you want to assign a public IP address, set to false if you don't.
+    Type: String
+    Default: true
+    AllowedValues:
+      - "true"
+      - "false"
+
+  AllInboundIp:
+    Description: Input an IP address you want to access with all.
+    Type: String
+    Default: "126.76.16.238/32"
+
+Resources:
+# ------------------------------------------------------------#
+# EC2
+# ------------------------------------------------------------#
+
+  WebDevelopInstance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      Comment: Setup Develop Instance
+    Properties:
+      EbsOptimized: true
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      IamInstanceProfile: !Ref DevelopInstanceProfile
+      Monitoring: false
+      Tenancy: default
+      ImageId: !Ref AmiId
+      InstanceType: !Ref WebDevelopInstanceType
+      KeyName: !Ref KeyName
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            Iops: 3000
+            DeleteOnTermination: true
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: !Ref AttachPublicIpAddress
+          DeleteOnTermination: true
+          GroupSet:
+            - Fn::ImportValue: !Sub "${Environment}-sg-dev"
+          DeviceIndex: 0
+          SubnetId:
+            Fn::ImportValue: !Sub "${Environment}-protected-subnet-dev"
+      Tags:
+        - Key: Name
+          Value: !Ref WebDevelopInstanceName
+
+  DbDevelopInstance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      Comment: Setup Product Instance
+    Properties:
+      EbsOptimized: true
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      IamInstanceProfile: !Ref DevelopInstanceProfile
+      Monitoring: false
+      Tenancy: default
+      ImageId: !Ref AmiId
+      InstanceType: !Ref DbDevelopInstanceType
+      KeyName: !Ref KeyName
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            Iops: 3000
+            DeleteOnTermination: true
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: !Ref AttachPublicIpAddress
+          DeleteOnTermination: true
+          GroupSet:
+            - Fn::ImportValue: !Sub "${Environment}-sg-dev"
+          DeviceIndex: 0
+          SubnetId:
+            Fn::ImportValue: !Sub "${Environment}-protected-subnet-dev"
+      Tags:
+        - Key: Name
+          Value: !Ref DbDevelopInstanceName
+
+# Create IAM Role
+  DevelopInstanceIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      RoleName: !Sub iamrole-${Environment}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+# Create Instance Profile
+  DevelopInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub instanceprifile-${Environment}
+      Path: /
+      Roles:
+        - !Ref DevelopInstanceIamRole
+
+# ElasticIP
+  WebDevelopInstanceEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain:
+        Fn::ImportValue: !Sub "${Environment}-vpc"
+
+  WebDevelopEIPAssociate:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt WebDevelopInstanceEIP.AllocationId
+      InstanceId: !Ref WebDevelopInstance
+
+  DbDevelopInstanceEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain:
+        Fn::ImportValue: !Sub "${Environment}-vpc"
+
+  DbDevelopEIPAssociate:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt DbDevelopInstanceEIP.AllocationId
+      InstanceId: !Ref DbDevelopInstance
+
+# ------------------------------------------------------------#
+# Output Parameters
+# ------------------------------------------------------------#
+Outputs:
+#EC2
+  WebinstanceId:
+    Value: !GetAtt WebDevelopInstance.InstanceId
+    Export:
+      Name: !Sub "${Environment}-web-ec2-instanceid"
+
+  DbinstanceId:
+    Value: !GetAtt DbDevelopInstance.InstanceId
+    Export:
+      Name: !Sub "${Environment}-db-ec2-instanceid"
