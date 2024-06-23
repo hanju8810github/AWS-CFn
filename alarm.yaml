@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description:
+  Web instance alarm Create
+
+## Input Parameters
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+
+Resources:
+
+# ------------------------------------------------------------#
+# SNS Topic 
+# ------------------------------------------------------------#
+  AutoscalingLambdaTrigerTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${Environment}-autoscaling-lambda-triger-topic"
+      Subscription:
+        - Endpoint: {"Fn::ImportValue": !Sub "${Environment}-autoscaling-judge-functionArn"}
+          Protocol: lambda
+          
+# ------------------------------------------------------------#
+# Cloudwatch Alarm 
+# ------------------------------------------------------------#
+  WebEC2CPUUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Environment}-web-ec2-cpu-utilization-alarm"
+      Namespace: "AWS/EC2"
+      MetricName: "CPUUtilization"
+      Threshold: 70
+      Unit: "Percent"
+      Period: 300
+      Statistic: "Average"
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      TreatMissingData: "notBreaching"
+      ActionsEnabled: True
+      AlarmActions:
+        - !GetAtt AutoscalingLambdaTrigerTopic.TopicArn
+      Dimensions:
+        - Name: "InstanceId"
+          Value: {"Fn::ImportValue": !Sub "${Environment}-web-ec2-instanceid"}
+
+# ------------------------------------------------------------#
+# Output Parameters
+# ------------------------------------------------------------#
+Outputs:
+# Lambda Triger Topic
+  AutoscalingLambdaTrigerTopic:
+    Value: !Ref AutoscalingLambdaTrigerTopic
+    Export:
+      Name: !Sub "${Environment}-autoscaling-judge-lambda-topic"

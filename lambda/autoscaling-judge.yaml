@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description:
+  Function to judge EC2 Auto Scaling
+
+# ------------------------------------------------------------#
+# Input Parameters
+# ------------------------------------------------------------#
+Parameters:
+ Environment:
+    Type: String
+    Default: dev
+
+Resources:
+
+  AutoScalingJudgePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AutoScalingJudgeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: {"Fn::ImportValue": !Sub "${Environment}-autoscaling-judge-lambda-topic"}
+
+  AutoScalingJudgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Environment}-judge-ec2-auto-scaling-role"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      Policies:
+        - PolicyName: !Sub "${Environment}-judge-ec2-auto-scaling-policy"
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:GetMetricStatistics
+                Resource: '*'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+# ------------------------------------------------------------#
+# Lambda Function 
+# ------------------------------------------------------------#
+  AutoScalingJudgeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${Environment}-autoscaling-judge-function"
+      Handler: index.lambda_handler
+      Description: Judge EC2 Auto Scaling
+      Runtime: python3.12
+      Role: !GetAtt AutoScalingJudgeRole.Arn
+      Environment:
+        Variables:
+          WebinstanceName: !Sub "${Environment}-web-ec2"
+          DbinstanceName: !Sub "${Environment}-db-ec2"
+          WebinstanceId: {"Fn::ImportValue": !Sub "${Environment}-web-ec2-instanceid" }
+          DbinstanceId: {"Fn::ImportValue": !Sub "${Environment}-db-ec2-instanceid" }
+          RegionName: "ap-northeast-1"
+      Code:
+        ZipFile: |
+          import os
+          import boto3
+          import datetime
+
+          region_name = os.getenv('RegionName')
+          dbid = os.getenv('DbinstanceId')
+
+          cw_client = boto3.client('cloudwatch',region_name)
+          ec2_client = boto3.client('ec2')
+
+          def lambda_handler(event, context):
+            describe_dbinstance_cpuutilizasion(dbinstanceid)
+
+          def describe_dbinstance_cpuutilizasion(dbid):
+            dbname = os.getenv('DbinstanceName')
+            print('## DB-INSTANCE-NAME',dbname)
+            print('## DB-INSTANCE-ID',dbid)
+            dtnow = datetime.datetime.now()
+
+            response = cw_client.get_metric_statistics(
+                    Namespace='AWS/EC2',
+                    MetricName='CPUUtilization',
+                    Dimensions=[
+                        {
+                            'Name': 'InstanceId',
+                            'Value': dbid,
+                        },
+                    ],
+                    StartTime=dtnow - datetime.timedelta(seconds=300),
+                    EndTime=dtnow,
+                    Period=300,
+                    Statistics=['Average'],
+            )
+            dbcpu_avg = response["Datapoints"][0]["Average"]
+            print('## DB-INSTANCE-CPUUTILIZATION',dbcpu_avg)
+
+# ------------------------------------------------------------#
+# Output Parameters
+# ------------------------------------------------------------#
+Outputs:
+# Lambda functiosn Arn
+  AutoScalingJudgeFunctionArn:
+    Value: !GetAtt AutoScalingJudgeFunction.Arn
+    Export:
+      Name: !Sub "${Environment}-autoscaling-judge-functionArn"
